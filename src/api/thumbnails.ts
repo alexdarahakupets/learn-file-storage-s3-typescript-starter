@@ -1,9 +1,9 @@
 import { getBearerToken, validateJWT } from "../auth";
 import { respondWithJSON } from "./json";
-import { getVideo } from "../db/videos";
+import { getVideo, updateVideo } from "../db/videos";
 import type { ApiConfig } from "../config";
 import type { BunRequest } from "bun";
-import { BadRequestError, NotFoundError } from "./errors";
+import { BadRequestError, NotFoundError, UserForbiddenError } from "./errors";
 
 type Thumbnail = {
   data: ArrayBuffer;
@@ -36,6 +36,9 @@ export async function handlerGetThumbnail(cfg: ApiConfig, req: BunRequest) {
   });
 }
 
+// 10 << 20 is the same as 10* 1024 * 1024
+const MAX_UPLOAD_SIZE = 10 << 20; // 10 MB
+
 export async function handlerUploadThumbnail(cfg: ApiConfig, req: BunRequest) {
   const { videoId } = req.params as { videoId?: string };
   if (!videoId) {
@@ -47,7 +50,36 @@ export async function handlerUploadThumbnail(cfg: ApiConfig, req: BunRequest) {
 
   console.log("uploading thumbnail for video", videoId, "by user", userID);
 
-  // TODO: implement the upload here
+  const formData = await req.formData();
+  const thumbnailData = formData.get('thumbnail');
+
+  if (!(thumbnailData instanceof File)) {
+    throw new BadRequestError("Invalid thumbnail")
+  }
+  if (thumbnailData.size > MAX_UPLOAD_SIZE) {
+    throw new BadRequestError(`Thumbnail size exceeds limit ${MAX_UPLOAD_SIZE / 1024 / 1024} MB`)
+  }
+
+  const thumbnailMediaType = thumbnailData.type;
+  const thumbnailImageData = await thumbnailData.arrayBuffer();
+
+  const videoMetadata = getVideo(cfg.db, videoId);
+
+  if (!videoMetadata) {
+    throw new NotFoundError(`Video id ${videoId} not found`);
+  }
+  if (videoMetadata.userID !== userID) {
+    throw new UserForbiddenError('Your user id doesn\'t match the video user id');
+  }
+
+  videoThumbnails.set(videoId, {
+    data: thumbnailImageData,
+    mediaType: thumbnailMediaType
+  } satisfies Thumbnail);
+
+  const thumbnailUrl = `http://localhost:${cfg.port}/api/thumbnails/${videoId}`
+
+  updateVideo(cfg.db, {...videoMetadata, thumbnailURL: thumbnailUrl})
 
   return respondWithJSON(200, null);
 }
