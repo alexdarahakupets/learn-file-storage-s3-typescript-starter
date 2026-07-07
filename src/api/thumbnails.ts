@@ -4,6 +4,7 @@ import { getVideo, updateVideo } from "../db/videos";
 import type { ApiConfig } from "../config";
 import type { BunRequest } from "bun";
 import { BadRequestError, NotFoundError, UserForbiddenError } from "./errors";
+import { getInMemoryURL } from "./assets";
 
 type Thumbnail = {
   data: ArrayBuffer;
@@ -36,40 +37,46 @@ export async function handlerGetThumbnail(cfg: ApiConfig, req: BunRequest) {
   });
 }
 
-// 10 << 20 is the same as 10* 1024 * 1024
-const MAX_UPLOAD_SIZE = 10 << 20; // 10 MB
-
 export async function handlerUploadThumbnail(cfg: ApiConfig, req: BunRequest) {
   const { videoId } = req.params as { videoId?: string };
   if (!videoId) {
     throw new BadRequestError("Invalid video ID");
   }
-
+  
   const token = getBearerToken(req.headers);
   const userID = validateJWT(token, cfg.jwtSecret);
 
   console.log("uploading thumbnail for video", videoId, "by user", userID);
-
+  
+  const dbVideo = getVideo(cfg.db, videoId);
+  if (!dbVideo) {
+    throw new NotFoundError(`Video id ${videoId} not found`);
+  }
+  if (dbVideo.userID !== userID) {
+    throw new UserForbiddenError('Your user id doesn\'t match the video user id');
+  }
+  
   const formData = await req.formData();
-  const thumbnailData = formData.get('thumbnail');
-
-  if (!(thumbnailData instanceof File)) {
+  const thumbnailFile = formData.get('thumbnail');
+  if (!(thumbnailFile instanceof File)) {
     throw new BadRequestError("Invalid thumbnail")
   }
-  if (thumbnailData.size > MAX_UPLOAD_SIZE) {
+
+  // 10 << 20 is the same as 10* 1024 * 1024
+  const MAX_UPLOAD_SIZE = 10 << 20; // 10 MB
+
+  if (thumbnailFile.size > MAX_UPLOAD_SIZE) {
     throw new BadRequestError(`Thumbnail size exceeds limit ${MAX_UPLOAD_SIZE / 1024 / 1024} MB`)
   }
 
-  const thumbnailMediaType = thumbnailData.type;
-  const thumbnailImageData = await thumbnailData.arrayBuffer();
-
-  const videoMetadata = getVideo(cfg.db, videoId);
-
-  if (!videoMetadata) {
-    throw new NotFoundError(`Video id ${videoId} not found`);
+  const thumbnailMediaType = thumbnailFile.type;
+  if (!thumbnailMediaType) {
+    throw new BadRequestError('Missing Content-Type for thumbnail');
   }
-  if (videoMetadata.userID !== userID) {
-    throw new UserForbiddenError('Your user id doesn\'t match the video user id');
+
+  const thumbnailImageData = await thumbnailFile.arrayBuffer();
+  if (!thumbnailImageData) {
+    throw new Error('Error reading file data');
   }
 
   videoThumbnails.set(videoId, {
@@ -77,9 +84,8 @@ export async function handlerUploadThumbnail(cfg: ApiConfig, req: BunRequest) {
     mediaType: thumbnailMediaType
   } satisfies Thumbnail);
 
-  const thumbnailUrl = `http://localhost:${cfg.port}/api/thumbnails/${videoId}`
-
-  updateVideo(cfg.db, {...videoMetadata, thumbnailURL: thumbnailUrl})
+  const thumbnailUrl = getInMemoryURL(cfg, videoId);
+  updateVideo(cfg.db, {...dbVideo, thumbnailURL: thumbnailUrl})
 
   return respondWithJSON(200, null);
 }
