@@ -6,6 +6,8 @@ import type { BunRequest } from "bun";
 import { BadRequestError, NotFoundError, UserForbiddenError } from "./errors";
 import { getAssetDiskPath, getAssetURL, mediaTypeToExt } from "./assets";
 
+const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/png'];
+
 export async function handlerUploadThumbnail(cfg: ApiConfig, req: BunRequest) {
   const { videoId } = req.params as { videoId?: string };
   if (!videoId) {
@@ -38,9 +40,10 @@ export async function handlerUploadThumbnail(cfg: ApiConfig, req: BunRequest) {
     throw new BadRequestError(`Thumbnail size exceeds limit ${MAX_UPLOAD_SIZE / 1024 / 1024} MB`)
   }
 
+  
   const thumbnailMediaType = thumbnailFile.type;
-  if (!thumbnailMediaType) {
-    throw new BadRequestError('Missing Content-Type for thumbnail');
+  if (!ALLOWED_IMAGE_TYPES.includes(thumbnailMediaType)) {
+    throw new BadRequestError("Invalid file type. Only JPEG or PNG allowed.");
   }
 
   const fileExtension = mediaTypeToExt(thumbnailMediaType);
