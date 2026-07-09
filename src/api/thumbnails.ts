@@ -4,7 +4,8 @@ import { getVideo, updateVideo } from "../db/videos";
 import type { ApiConfig } from "../config";
 import type { BunRequest } from "bun";
 import { BadRequestError, NotFoundError, UserForbiddenError } from "./errors";
-import { getAssetDiskPath, getAssetURL, mediaTypeToExt } from "./assets";
+import { mediaTypeToExt } from "./assets";
+import path from "path";
 
 const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/png'];
 
@@ -48,11 +49,9 @@ export async function handlerUploadThumbnail(cfg: ApiConfig, req: BunRequest) {
 
   const fileExtension = mediaTypeToExt(thumbnailMediaType);
   const fileName = `${videoId}${fileExtension}`;
-  const assetDiskPath = getAssetDiskPath(cfg, fileName);
-
+  const assetDiskPath = path.join(cfg.assetsRoot, fileName);
   Bun.write(assetDiskPath, thumbnailFile)
-
-  const thumbnailDataUrl = getAssetURL(cfg, assetDiskPath);
+  const thumbnailDataUrl = `http://localhost:${cfg.port}/${assetDiskPath}`;
 
   updateVideo(cfg.db, {...dbVideo, thumbnailURL: thumbnailDataUrl, })
 
